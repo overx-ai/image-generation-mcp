@@ -47,7 +47,8 @@ class ImageCache:
         logger.info(f"Cache initialized - Directory: {cache_dir}, TTL: {ttl_days} days, Max size: {max_size_mb} MB")
     
     def generate_cache_key(self, prompt: str, model: str, style: str = "photorealistic", 
-                          aspect_ratio: str = "landscape", width: int = 1024, height: int = 768) -> str:
+                          aspect_ratio: str = "landscape", replicate_aspect_ratio: str = None, 
+                          megapixels: str = "1", width: int = 1024, height: int = 768) -> str:
         """
         Generate a SHA256 cache key from generation parameters.
         
@@ -55,16 +56,24 @@ class ImageCache:
             prompt: Text prompt for image generation
             model: Model identifier
             style: Image style
-            aspect_ratio: Aspect ratio setting
-            width: Image width
-            height: Image height
+            aspect_ratio: User-provided aspect ratio (for backward compatibility)
+            replicate_aspect_ratio: Actual Replicate aspect ratio format (e.g., "16:9")
+            megapixels: Megapixel setting for Replicate
+            width: Legacy width parameter (for backward compatibility)
+            height: Legacy height parameter (for backward compatibility)
             
         Returns:
             SHA256 hash as hex string
         """
         # Normalize inputs for consistent hashing
         normalized_prompt = prompt.strip().lower()
-        cache_input = f"{normalized_prompt}|{model}|{style}|{aspect_ratio}|{width}x{height}"
+        
+        # Use the replicate format if available, otherwise fall back to legacy
+        if replicate_aspect_ratio:
+            cache_input = f"{normalized_prompt}|{model}|{style}|{replicate_aspect_ratio}|{megapixels}"
+        else:
+            # Legacy format for backward compatibility
+            cache_input = f"{normalized_prompt}|{model}|{style}|{aspect_ratio}|{width}x{height}"
         
         cache_key = hashlib.sha256(cache_input.encode('utf-8')).hexdigest()
         logger.debug(f"Generated cache key: {cache_key} for input: {cache_input}")

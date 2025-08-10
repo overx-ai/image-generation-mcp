@@ -9,13 +9,34 @@ cache:
   max_size_mb: 1000
 defaults:
   max_retries: 3
+
+# Model Configuration
 models:
+  # Default budget model - SDXL intended but using FLUX Schnell due to API access
+  # TODO: Switch back to "stability-ai/sdxl" when API access is available
   default: "black-forest-labs/flux-schnell"
+  
+  # Budget models - mix of custom aspect ratios via width/height and native
+  budget:
+    sdxl: "stability-ai/sdxl"
+    flux_schnell: "black-forest-labs/flux-schnell"
+    
+  # Premium models (native aspect ratio support)
+  premium:
+    flux_dev: "black-forest-labs/flux-dev" 
+    flux_pro: "black-forest-labs/flux-1.1-pro"
+    recraft: "recraft-ai/recraft-v3"
+    seedream: "bytedance/seedream-3"
+    ideogram_turbo: "ideogram-ai/ideogram-v3-turbo"
+  
+  # Style mapping for default model (currently FLUX Schnell as SDXL fallback)
   style_mapping:
     photorealistic: "black-forest-labs/flux-schnell"
+    photorealistic_with_text: "ideogram-ai/ideogram-v3-turbo"
     artistic: "black-forest-labs/flux-schnell"
-    cartoon: "black-forest-labs/flux-schnell"
+    cartoon: "black-forest-labs/flux-schnell"  
     sketch: "black-forest-labs/flux-schnell"
+
 retry:
   max_attempts: 3
   backoff_factor: 2

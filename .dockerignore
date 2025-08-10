@@ -1,0 +1,26 @@
+# Development files
+.env
+.env.example
+.git
+.gitignore
+*.log
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+*.egg-info
+
+# Data directories
+data/
+logs/
+
+# Deployment
+deployment/
+start.sh
+
+# Test files
+*test*.py

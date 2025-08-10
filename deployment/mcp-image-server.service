@@ -1,0 +1,28 @@
+[Unit]
+Description=MCP Image Generation Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=your-username
+Group=your-group
+WorkingDirectory=/path/to/image-generation-mcp/mcp_image_server
+Environment=PATH=/home/your-username/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/path/to/image-generation-mcp/.env
+ExecStart=/home/your-username/.local/bin/uv run python server.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcp-image-server
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/path/to/image-generation-mcp/data
+
+[Install]
+WantedBy=multi-user.target

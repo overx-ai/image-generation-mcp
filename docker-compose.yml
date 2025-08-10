@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  mcp-image-server:
+    build: .
+    container_name: mcp-image-server
+    restart: unless-stopped
+    environment:
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
+    volumes:
+      # Mount data directory for persistent storage
+      - ./data:/app/data
+      # Mount logs directory
+      - ./logs:/app/logs
+    working_dir: /app/mcp_image_server
+    # For MCP over STDIO, we typically don't need ports
+    # but uncomment if you add HTTP interface later
+    ports:
+      - "8008:8008"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.path.insert(0, '.'); import server; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

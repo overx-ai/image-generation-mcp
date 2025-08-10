@@ -18,7 +18,7 @@ cp .env.example .env
 ### 2. Get API Token
 
 1. Go to [Replicate.com](https://replicate.com/)
-2. Sign up/login � Account Settings � API Tokens
+2. Sign up/login → Account Settings → API Tokens
 3. Copy your token to `.env` file
 
 ### 3. Run MCP Server
@@ -61,19 +61,46 @@ Add to your MCP client configuration:
 
 ## Features
 
--  High-quality image generation (FLUX model)
--  Intelligent caching system
--  Retry logic with exponential backoff
--  Organized file storage by date
--  Complete metadata tracking
--  External data storage (outside code)
+- ✨ High-quality image generation (FLUX model)
+- 🗄️ Intelligent caching system
+- 🔄 Retry logic with exponential backoff
+- 📁 Organized file storage by date
+- 📊 Complete metadata tracking
+- 🏠 External data storage (outside code)
 
-## Testing
+## Deployment Options
 
+### Local Development
 ```bash
-# Test configuration
-cd mcp_image_server
-uv run python -c "import server; print(' Config loaded')"
+# Quick start script
+./start.sh
 ```
+
+### Docker (Recommended)
+```bash
+# One-command Docker setup
+./docker-run.sh
+```
+Images accessible in `./data/generated_images/` on host machine.
+
+### Linux Systemd Service
+```bash
+# Install as system service
+sudo ./deployment/install-systemd.sh
+```
+
+### Process Manager (Supervisor)
+```bash
+# Setup supervisor
+./deployment/setup-supervisor.sh
+# Start service
+supervisord -c deployment/supervisor.conf
+```
+
+## Generated Images Access
+
+- **Local/Docker**: `./data/generated_images/YYYY-MM/DD/`
+- **MCP tool**: Use `list_generated_images` to inventory all images
+- **Persistence**: All deployment options maintain data outside containers
 
 Generated images are saved with metadata and cached for efficiency. Cost: ~$0.025 per image.

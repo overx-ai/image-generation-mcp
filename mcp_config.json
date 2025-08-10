@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "image-gen-mcp": {
+      "type": "stdio", 
+      "command": "/Users/user/.local/bin/uv",
+      "args": [
+        "run",
+        "python",
+        "/Users/user/JACK/CLAUDE_SANDBOX/image-generation-mcp/mcp_image_server/server.py"
+      ]
+    }
+  }
+}

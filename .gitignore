@@ -19,7 +19,7 @@ clean_env/
 .idea/
 *.swp
 *.swo
-
+*.iml
 # OS
 .DS_Store
 Thumbs.db
@@ -29,6 +29,7 @@ generated_images/
 cache/
 *.log
 config.json
-
+data
 # Keep example configs
 !config.yaml
+

@@ -28,30 +28,102 @@ class ReplicateProvider(BaseProvider):
     
     # Model configurations with costs and metadata
     MODEL_CONFIGS = {
+        # Budget Models - Custom aspect ratios via width/height
+        "stability-ai/sdxl": {
+            "friendly_name": "SDXL (Budget)",
+            "cost_per_run": 0.0025,  # ~400 images per $1 
+            "max_width": 1024,
+            "max_height": 1024,
+            "aspect_ratio_mode": "width_height",  # Uses width/height parameters
+            "category": "budget"
+        },
+        "bytedance/sdxl-lightning-4step": {
+            "friendly_name": "SDXL-Lightning (Budget)",
+            "cost_per_run": 0.002,  # ~500 images per $1 
+            "max_width": 1024,
+            "max_height": 1024,
+            "aspect_ratio_mode": "width_height",  # Uses width/height parameters
+            "category": "budget"
+        },
         "stability-ai/stable-diffusion:27b93a2413e7f36cd83da926f36bc82acaa43cc671ba16622c0b040067a0098": {
             "friendly_name": "Stable Diffusion v1.5",
             "cost_per_run": 0.018,
             "max_width": 1024,
-            "max_height": 1024
+            "max_height": 1024,
+            "aspect_ratio_mode": "width_height",
+            "category": "budget"
         },
-        "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b": {
-            "friendly_name": "SDXL",
-            "cost_per_run": 0.030,
-            "max_width": 1216,
-            "max_height": 896
-        },
-        "black-forest-labs/flux-dev": {
-            "friendly_name": "FLUX.1 [dev]",
-            "cost_per_run": 0.025,
-            "max_width": 1440,
-            "max_height": 1440
-        },
-        "flux-dev": {
-            "friendly_name": "FLUX.1 [dev]",
-            "cost_per_run": 0.025,
+        
+        # Budget Models - Native aspect ratio support
+        "black-forest-labs/flux-schnell": {
+            "friendly_name": "FLUX.1 [schnell] (Budget Premium)",
+            "cost_per_run": 0.003,  # ~333 images per $1
             "max_width": 1440,
             "max_height": 1440,
-            "actual_model": "black-forest-labs/flux-dev"
+            "aspect_ratio_mode": "native",  # Uses aspect_ratio parameter
+            "category": "budget"
+        },
+        
+        # Premium Models - Native aspect ratio support
+        "black-forest-labs/flux-dev": {
+            "friendly_name": "FLUX.1 [dev] (Quality Premium)",
+            "cost_per_run": 0.030,  # ~33 images per $1
+            "max_width": 1440,
+            "max_height": 1440,
+            "aspect_ratio_mode": "native",
+            "category": "premium"
+        },
+        "black-forest-labs/flux-1.1-pro": {
+            "friendly_name": "FLUX 1.1 [pro] (Ultra Premium)",
+            "cost_per_run": 0.040,  # ~25 images per $1
+            "max_width": 1440,
+            "max_height": 1440,
+            "aspect_ratio_mode": "native",
+            "category": "premium"
+        },
+        "recraft-ai/recraft-v3": {
+            "friendly_name": "Recraft V3 (Design Premium)",
+            "cost_per_run": 0.040,  # ~25 images per $1
+            "max_width": 1440,
+            "max_height": 1440,
+            "aspect_ratio_mode": "native",
+            "category": "premium"
+        },
+        "bytedance/seedream-3": {
+            "friendly_name": "Seedream-3 (Ultra Premium)",
+            "cost_per_run": 0.050,  # ~20 images per $1
+            "max_width": 2048,
+            "max_height": 2048,
+            "aspect_ratio_mode": "native",
+            "category": "premium"
+        },
+        "ideogram-ai/ideogram-v3-turbo": {
+            "friendly_name": "Ideogram V3 Turbo (Text Specialist)",
+            "cost_per_run": 0.035,  # ~28 images per $1, excellent for text in images
+            "max_width": 2048,
+            "max_height": 2048,
+            "aspect_ratio_mode": "native",
+            "category": "premium"
+        },
+        
+        # Aliases for backward compatibility
+        "flux-schnell": {
+            "friendly_name": "FLUX.1 [schnell]",
+            "cost_per_run": 0.003,
+            "max_width": 1440,
+            "max_height": 1440,
+            "actual_model": "black-forest-labs/flux-schnell",
+            "aspect_ratio_mode": "native",
+            "category": "premium"
+        },
+        "flux-dev": {
+            "friendly_name": "FLUX.1 [dev]", 
+            "cost_per_run": 0.030,
+            "max_width": 1440,
+            "max_height": 1440,
+            "actual_model": "black-forest-labs/flux-dev",
+            "aspect_ratio_mode": "native",
+            "category": "premium"
         }
     }
     

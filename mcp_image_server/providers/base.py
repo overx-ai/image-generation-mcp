@@ -122,8 +122,13 @@ class BaseProvider(ABC):
                 attempt_start = time.time()
                 attempt_msg = f"Generation attempt {attempt + 1}/{self.max_attempts}"
                 logger.info(attempt_msg)
-                if ctx:
-                    ctx.info(attempt_msg)
+                
+                # Safely handle context info logging
+                try:
+                    if ctx and hasattr(ctx, 'info') and callable(ctx.info):
+                        ctx.info(attempt_msg)
+                except Exception as ctx_error:
+                    logger.warning(f"Context info logging failed: {ctx_error}")
                 
                 # Call provider-specific implementation
                 result = await self._generate_image(prompt, model, ctx, **kwargs)
@@ -144,8 +149,13 @@ class BaseProvider(ABC):
                 success_msg = (f"Image generation successful on attempt {attempt + 1} "
                              f"in {format_duration(generation_time)}")
                 logger.info(success_msg)
-                if ctx:
-                    ctx.info(success_msg)
+                
+                # Safely handle context info logging
+                try:
+                    if ctx and hasattr(ctx, 'info') and callable(ctx.info):
+                        ctx.info(success_msg)
+                except Exception as ctx_error:
+                    logger.warning(f"Context info logging failed: {ctx_error}")
                 
                 return result
                 
@@ -156,8 +166,13 @@ class BaseProvider(ABC):
                 error_msg = (f"Generation attempt {attempt + 1}/{self.max_attempts} failed "
                            f"after {format_duration(attempt_time)}: {str(e)} ({type(e).__name__})")
                 logger.error(error_msg)
-                if ctx:
-                    ctx.error(error_msg)
+                
+                # Safely handle context error logging
+                try:
+                    if ctx and hasattr(ctx, 'error') and callable(ctx.error):
+                        ctx.error(error_msg)
+                except Exception as ctx_error:
+                    logger.warning(f"Context error logging failed: {ctx_error}")
                 
                 # Don't sleep after the last attempt
                 if attempt < self.max_attempts - 1:
@@ -170,8 +185,13 @@ class BaseProvider(ABC):
                     
                     retry_msg = f"Retrying in {format_duration(total_delay)} (base: {format_duration(base_delay)}, jitter: {format_duration(jitter)})"
                     logger.info(retry_msg)
-                    if ctx:
-                        ctx.info(retry_msg)
+                    
+                    # Safely handle context info logging
+                    try:
+                        if ctx and hasattr(ctx, 'info') and callable(ctx.info):
+                            ctx.info(retry_msg)
+                    except Exception as ctx_error:
+                        logger.warning(f"Context info logging failed: {ctx_error}")
                     
                     await asyncio.sleep(total_delay)
         
@@ -180,8 +200,13 @@ class BaseProvider(ABC):
         final_error_msg = (f"All {self.max_attempts} generation attempts failed "
                           f"after {format_duration(total_time)}. Last error: {str(last_exception)}")
         logger.error(final_error_msg)
-        if ctx:
-            ctx.error(final_error_msg)
+        
+        # Safely handle context error logging
+        try:
+            if ctx and hasattr(ctx, 'error') and callable(ctx.error):
+                ctx.error(final_error_msg)
+        except Exception as ctx_error:
+            logger.warning(f"Context error logging failed: {ctx_error}")
         
         raise last_exception
     
