@@ -1,0 +1,23 @@
+provider: "replicate"
+storage:
+  base_path: "../data/generated_images"
+  organize_by_date: true
+cache:
+  enabled: true
+  cache_dir: "../data/cache"
+  ttl_days: 30
+  max_size_mb: 1000
+defaults:
+  max_retries: 3
+models:
+  default: "black-forest-labs/flux-schnell"
+  style_mapping:
+    photorealistic: "black-forest-labs/flux-schnell"
+    artistic: "black-forest-labs/flux-schnell"
+    cartoon: "black-forest-labs/flux-schnell"
+    sketch: "black-forest-labs/flux-schnell"
+retry:
+  max_attempts: 3
+  backoff_factor: 2
+  initial_delay: 1.0
+  max_delay: 60.0

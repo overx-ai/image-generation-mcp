@@ -1,0 +1,24 @@
+[project]
+name = "image-generation-mcp"
+version = "0.1.0"
+description = "MCP server for AI image generation using Replicate API"
+readme = "README.md"
+authors = [
+    { name = "Jack Ma", email = "hustlequeen@mail.ru" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.11.2",
+    "replicate>=1.0.7",
+    "aiohttp>=3.12.15",
+    "pyyaml>=6.0.2",
+    "pydantic>=2.11.7",
+    "python-dotenv>=1.1.1",
+]
+
+[project.scripts]
+image-generation-mcp = "mcp_image_server.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

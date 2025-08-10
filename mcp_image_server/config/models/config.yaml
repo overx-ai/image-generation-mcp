@@ -1,0 +1,33 @@
+# Model configurations for different providers
+replicate:
+  models:
+    flux-dev:
+      id: "black-forest-labs/flux-dev"
+      friendly_name: "FLUX.1 [dev]"
+      cost_per_run: 0.025
+      max_width: 1440
+      max_height: 1440
+      supported_formats: ["png", "jpg", "webp"]
+    
+    stable-diffusion:
+      id: "stability-ai/stable-diffusion:27b93a2413e7f36cd83da926f36bc82acaa43cc671ba16622c0b040067a0098"
+      friendly_name: "Stable Diffusion"
+      cost_per_run: 0.018
+      max_width: 1024
+      max_height: 1024
+      supported_formats: ["png", "jpg"]
+    
+    sdxl:
+      id: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b"
+      friendly_name: "SDXL"
+      cost_per_run: 0.030
+      max_width: 1216
+      max_height: 896
+      supported_formats: ["png", "jpg", "webp"]
+
+eden_ai:
+  models:
+    stable-diffusion:
+      id: "stabilityai__stable-diffusion-v1-5"
+      friendly_name: "Stable Diffusion v1.5"
+      cost_per_run: 0.020
