@@ -30,9 +30,9 @@ class EdenAIProvider(BaseProvider):
         """Generate image using Eden AI (not implemented)."""
         raise NotImplementedError("Eden AI provider is not implemented yet")
     
-    def estimate_cost(self, model: str) -> float:
+    def estimate_cost(self, model: str, quality: str = None) -> float:
         """Estimate cost for Eden AI model."""
-        # Default estimate for Eden AI
+        # Default estimate for Eden AI (no per-quality pricing)
         return 0.020
     
     def get_model_friendly_name(self, model: str) -> str:

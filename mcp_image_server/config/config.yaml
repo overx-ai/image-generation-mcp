@@ -12,33 +12,54 @@ defaults:
 
 # Model Configuration
 models:
-  # Default budget model - SDXL intended but using FLUX Schnell due to API access
-  # TODO: Switch back to "stability-ai/sdxl" when API access is available
-  default: "black-forest-labs/flux-schnell"
-  
+  # Default model across tools - OpenAI gpt-image-2 (all tools default to
+  # quality "medium" ~$0.047/image). Override per call via `model`.
+  default: "openai/gpt-image-2"
+
+  # Tried in order when the primary model fails (e.g. the OpenAI account behind
+  # gpt-image-2 runs out of credit). All Replicate-native, no OpenAI dependency.
+  # "nano-banana" resolves by requested quality: low/medium -> google/nano-banana-2,
+  # high/auto -> google/nano-banana-pro.
+  fallback:
+    - "nano-banana"
+    - "bytedance/seedream-3"
+
   # Budget models - mix of custom aspect ratios via width/height and native
   budget:
     sdxl: "stability-ai/sdxl"
     flux_schnell: "black-forest-labs/flux-schnell"
-    
+
   # Premium models (native aspect ratio support)
   premium:
-    flux_dev: "black-forest-labs/flux-dev" 
+    gpt_image_2: "openai/gpt-image-2"
+    nano_banana_2: "google/nano-banana-2"
+    nano_banana_pro: "google/nano-banana-pro"
+    flux_dev: "black-forest-labs/flux-dev"
     flux_pro: "black-forest-labs/flux-1.1-pro"
     recraft: "recraft-ai/recraft-v3"
     seedream: "bytedance/seedream-3"
     ideogram_turbo: "ideogram-ai/ideogram-v3-turbo"
-  
-  # Style mapping for default model (currently FLUX Schnell as SDXL fallback)
+
+  # Style mapping - gpt-image-2 is the default for all styles
   style_mapping:
-    photorealistic: "black-forest-labs/flux-schnell"
-    photorealistic_with_text: "ideogram-ai/ideogram-v3-turbo"
-    artistic: "black-forest-labs/flux-schnell"
-    cartoon: "black-forest-labs/flux-schnell"  
-    sketch: "black-forest-labs/flux-schnell"
+    photorealistic: "openai/gpt-image-2"
+    photorealistic_with_text: "openai/gpt-image-2"
+    artistic: "openai/gpt-image-2"
+    cartoon: "openai/gpt-image-2"
+    sketch: "openai/gpt-image-2"
 
 retry:
   max_attempts: 3
   backoff_factor: 2
   initial_delay: 1.0
   max_delay: 60.0
+
+# Image optimization settings for web deployment
+optimization:
+  enabled: true  # Enable web optimization by default
+  max_width: 2048  # Maximum width for web images
+  max_height: 2048  # Maximum height for web images
+  jpeg_quality: 85  # JPEG quality (1-100)
+  webp_quality: 85  # WebP quality (1-100)
+  create_webp: true  # Create WebP variants for better compression
+  create_responsive: false  # Create responsive image variants (can be enabled later)

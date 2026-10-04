@@ -12,9 +12,29 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
-from core.utils import calculate_exponential_backoff, format_duration
+from mcp_image_server.core.utils import calculate_exponential_backoff, format_duration
 
 logger = logging.getLogger(__name__)
+
+# Errors that retrying cannot fix (billing, auth). Retrying them just delays the
+# caller's fallback to another model by the full backoff schedule.
+NON_RETRYABLE_PATTERNS = (
+    "sufficient credits",
+    "insufficient",
+    "invalid api key",
+    "api key is invalid",
+    "incorrect api key",
+    "authentication",
+    "unauthorized",
+    "(e001)",  # no credits
+    "(e002)",  # invalid key
+)
+
+
+def is_non_retryable(error: Exception) -> bool:
+    """True when the error will fail identically on every retry."""
+    message = str(error).lower()
+    return any(pattern in message for pattern in NON_RETRYABLE_PATTERNS)
 
 
 class BaseProvider(ABC):
@@ -66,13 +86,15 @@ class BaseProvider(ABC):
         pass
     
     @abstractmethod
-    def estimate_cost(self, model: str) -> float:
+    def estimate_cost(self, model: str, quality: str = None) -> float:
         """
         Estimate the cost for generating an image with the given model.
-        
+
         Args:
             model: Model identifier
-            
+            quality: Optional quality variant (e.g. low/medium/high) for models
+                     whose price depends on it; ignored by models without variants
+
         Returns:
             Estimated cost in USD
         """
@@ -141,7 +163,7 @@ class BaseProvider(ABC):
                     "generation_time": generation_time,
                     "attempt_time": attempt_time,
                     "attempts": attempt + 1,
-                    "estimated_cost": self.estimate_cost(model),
+                    "estimated_cost": self.estimate_cost(model, kwargs.get("quality")),
                     "model": model,
                     "provider": self.__class__.__name__
                 })
@@ -173,7 +195,11 @@ class BaseProvider(ABC):
                         ctx.error(error_msg)
                 except Exception as ctx_error:
                     logger.warning(f"Context error logging failed: {ctx_error}")
-                
+
+                if is_non_retryable(e):
+                    logger.error("Error is not retryable (billing/auth) - giving up immediately")
+                    break
+
                 # Don't sleep after the last attempt
                 if attempt < self.max_attempts - 1:
                     # Calculate exponential backoff with jitter
@@ -218,8 +244,10 @@ class BaseProvider(ABC):
         logger.info(f"  Prompt: {prompt}")
         logger.info(f"  Estimated cost: ${self.estimate_cost(model):.4f}")
         
+        sensitive_keys = {"openai_api_key", "api_key", "api_token", "token"}
         for key, value in kwargs.items():
-            logger.info(f"  {key}: {value}")
+            safe_value = "***redacted***" if key in sensitive_keys else value
+            logger.info(f"  {key}: {safe_value}")
     
     def validate_model(self, model: str) -> bool:
         """
