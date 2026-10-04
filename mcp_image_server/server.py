@@ -8,6 +8,7 @@ with sophisticated caching, retry logic, and provider abstraction.
 
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import os
@@ -32,8 +33,11 @@ load_dotenv(dotenv_path=env_file)
 
 # Import our core components
 from mcp_image_server.core.cache import ImageCache
+from mcp_image_server.providers.openai_images import OpenAIImagesProvider
 from mcp_image_server.providers.replicate import ReplicateProvider
 from mcp_image_server.utils.image_optimizer import ImageOptimizer
+
+MODEL_CONFIGS = {**ReplicateProvider.MODEL_CONFIGS, **OpenAIImagesProvider.MODEL_CONFIGS}
 
 # Initialize MCP server 
 mcp = FastMCP("Image Generation Server")
@@ -57,11 +61,13 @@ if not replicate_api_token:
     print("⚠️ Warning: REPLICATE_API_TOKEN environment variable not set.")
     print("   Please set it in your .env file or environment: REPLICATE_API_TOKEN=your_api_key")
 
-# Optional: use your own OpenAI key for gpt-image-2 (billed to your OpenAI
-# account directly). When unset, gpt-image-2 runs via Replicate's proxy.
+# OpenAI key: required for gpt-image-2.5 (OpenAI-direct), optional for gpt-image-2
+# (passed through Replicate; without it gpt-image-2 is Replicate-billed).
 openai_api_key = os.environ.get("OPENAI_API_KEY")
 if openai_api_key:
-    logger.info("OPENAI_API_KEY detected - gpt-image-2 will use your OpenAI account directly")
+    logger.info("OPENAI_API_KEY detected - gpt-image-2.5 and gpt-image-2 will bill your OpenAI account")
+else:
+    logger.warning("OPENAI_API_KEY not set - gpt-image-2.5 is unavailable, falling back to Replicate models")
 
 
 def load_config(config_path: str = 'config/config.yaml') -> dict:
@@ -138,12 +144,15 @@ async def download_and_process_image(url: str, filepath: Path, optimize_for_web:
         # Ensure directory exists
         filepath.parent.mkdir(parents=True, exist_ok=True)
         
-        # Download image data
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        
+        if url.startswith(("http://", "https://")):
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            image_bytes = response.content
+        else:
+            image_bytes = Path(url).read_bytes()
+
         # Open image with Pillow to detect format and get dimensions
-        image = Image.open(requests.get(url, stream=True).raw)
+        image = Image.open(io.BytesIO(image_bytes))
         actual_format = image.format.lower() if image.format else 'unknown'
         actual_dimensions = image.size  # (width, height)
         
@@ -335,6 +344,22 @@ def resolve_gpt_aspect_ratio(aspect_ratio: str) -> str:
     return GPT_IMAGE_ASPECT_MAP.get(aspect_ratio, "1:1")
 
 
+# The OpenAI Images API takes WIDTHxHEIGHT (both divisible by 16), not ratios.
+OPENAI_SIZE_MAP = {
+    "square": "1024x1024", "1:1": "1024x1024",
+    "landscape": "1536x1024", "3:2": "1536x1024", "4:3": "1536x1024", "5:4": "1536x1024",
+    "16:9": "2048x1152", "21:9": "2048x1152",
+    "portrait": "1024x1536", "2:3": "1024x1536", "3:4": "1024x1536", "4:5": "1024x1536",
+    "9:16": "1152x2048", "9:21": "1152x2048",
+    "auto": "auto",
+}
+
+
+def resolve_openai_size(aspect_ratio: str) -> str:
+    """Map a user/tool aspect ratio onto an OpenAI Images API size."""
+    return OPENAI_SIZE_MAP.get(aspect_ratio, "1024x1024")
+
+
 # Quality variants for gpt-image-2 (drives price). Ignored by models without
 # per-quality pricing, so it is safe to accept on every generation tool.
 VALID_QUALITIES = ("low", "medium", "high", "auto")
@@ -501,6 +526,8 @@ def _demo_fallback() -> None:
 
     # Attempt chain: gpt-image-2 -> same model w/o our key -> nano-banana -> seedream
     cfg = {"models": {"fallback": ["nano-banana", "bytedance/seedream-3"]}}
+    cfg25 = {"models": {"fallback": ["openai/gpt-image-2", "nano-banana", "bytedance/seedream-3"]}}
+    flare = "openai/gpt-image-2.5-flare"
     global openai_api_key
     saved_key, openai_api_key = openai_api_key, "sk-test"
     try:
@@ -522,6 +549,20 @@ def _demo_fallback() -> None:
         gpt_no_key = build_model_input("openai/gpt-image-2", "p", "1:1", "1:1", "medium",
                                        use_openai_key=False)
         assert "openai_api_key" not in gpt_no_key
+
+        # gpt-image-2.5 (OpenAI-direct) -> gpt-image-2 Replicate-billed -> nano-banana -> seedream
+        chain25 = build_attempts(cfg25, flare, "medium")
+        assert chain25 == [(flare, True), ("openai/gpt-image-2", False),
+                           ("google/nano-banana-2", False), ("bytedance/seedream-3", False)], chain25
+        g25 = build_model_input(flare, "p", "16:9", "16:9", "high")
+        assert g25 == {"prompt": "p", "size": "2048x1152", "quality": "high", "output_format": "png"}, g25
+        g25_ref = build_model_input(flare, "p", "1:1", "1:1", None, reference_images=["https://x/a.png"])
+        assert g25_ref["image"] == ["https://x/a.png"] and g25_ref["quality"] == "medium"
+        assert all(int(n) % 16 == 0 for s in OPENAI_SIZE_MAP.values() if s != "auto" for n in s.split("x"))
+
+        # Without an OpenAI key, gpt-image-2.5 is skipped rather than failing every call
+        openai_api_key = None
+        assert build_attempts(cfg25, flare, "medium")[0] == ("openai/gpt-image-2", False)
     finally:
         openai_api_key = saved_key
 
@@ -589,12 +630,21 @@ def _demo_async_jobs() -> None:
 
 def build_model_input(model, prompt, aspect_ratio, replicate_aspect_ratio=None, quality=None,
                       output_format=None, reference_images=None, use_openai_key=True):
-    """Build the Replicate input dict for a model, per its MODEL_CONFIGS entry."""
-    from mcp_image_server.providers.replicate import ReplicateProvider
-    model_config = ReplicateProvider.MODEL_CONFIGS.get(model, {})
+    """Build the provider input dict for a model, per its MODEL_CONFIGS entry."""
+    model_config = MODEL_CONFIGS.get(model, {})
     aspect_ratio_mode = model_config.get("aspect_ratio_mode", "width_height")
 
-    if aspect_ratio_mode == "gpt_image":
+    if aspect_ratio_mode == "openai_size":
+        # gpt-image-2.5 via the OpenAI Images API - WxH size, key held by the provider
+        model_input = {
+            "prompt": prompt,
+            "size": resolve_openai_size(aspect_ratio),
+            "quality": quality or model_config.get("default_quality", "medium"),
+            "output_format": output_format or "png",
+        }
+        logger.info(f"Using OpenAI size mode for {model}: size={model_input['size']}, "
+                    f"quality={model_input['quality']}")
+    elif aspect_ratio_mode == "gpt_image":
         # gpt-image-2 - restricted aspect ratios + quality variant, NO megapixels
         gpt_aspect_ratio = resolve_gpt_aspect_ratio(aspect_ratio)
         model_input = {
@@ -640,7 +690,7 @@ def build_model_input(model, prompt, aspect_ratio, replicate_aspect_ratio=None, 
         image_param = model_config.get("image_input_param")
         if not image_param:
             supported = sorted(
-                m for m, c in ReplicateProvider.MODEL_CONFIGS.items()
+                m for m, c in MODEL_CONFIGS.items()
                 if c.get("image_input_param")
             )
             raise ValueError(
@@ -662,9 +712,9 @@ def build_attempts(config, selected_model, quality, reference_images=None):
 
     Rung 2 re-runs gpt-image-2 without our OpenAI key (Replicate-billed) - that alone
     recovers from "your token does not have sufficient credits". Rung 3+ switch models.
+    OpenAI-direct models (gpt-image-2.5) are skipped when no OpenAI key is configured.
     """
-    from mcp_image_server.providers.replicate import ReplicateProvider
-    configs = ReplicateProvider.MODEL_CONFIGS
+    configs = MODEL_CONFIGS
 
     attempts = [(selected_model, True)]
     if openai_api_key and configs.get(selected_model, {}).get("aspect_ratio_mode") == "gpt_image":
@@ -679,7 +729,25 @@ def build_attempts(config, selected_model, quality, reference_images=None):
         # Empty means the requested model itself can't take references - keep it so
         # build_model_input raises the explanatory ValueError instead of nothing.
         attempts = usable or attempts[:1]
+
+    if not openai_api_key:
+        keyed = [a for a in attempts if configs.get(a[0], {}).get("requires_openai_key")]
+        if keyed:
+            logger.warning(f"Skipping {[m for m, _ in keyed]}: OPENAI_API_KEY not set")
+        attempts = [a for a in attempts if a not in keyed] or attempts
     return attempts
+
+
+def get_provider(model: str, config: Dict[str, Any]):
+    """The provider that serves `model`, with its credential."""
+    if model in OpenAIImagesProvider.MODEL_CONFIGS:
+        if not openai_api_key:
+            raise ValueError(f"{model} needs OPENAI_API_KEY in .env")
+        return OpenAIImagesProvider(openai_api_key, config)
+    if not replicate_api_token:
+        raise ValueError("Replicate API token not configured. Please set REPLICATE_API_TOKEN "
+                         "in your .env file or environment.")
+    return ReplicateProvider(replicate_api_token, config)
 
 
 async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_key, CACHE, replicate_aspect_ratio=None, quality=None, output_format=None, reference_images=None, output_dir=None, filename=None):
@@ -699,14 +767,6 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
     Returns:
         Dict containing generation results
     """
-    # Get API token from environment
-    provider_name = config.get("provider", "replicate")
-    
-    api_token = replicate_api_token
-    if not api_token:
-        logger.error(f"{provider_name.title()} API token not configured")
-        raise ValueError(f"{provider_name.title()} API token not configured. Please set REPLICATE_API_TOKEN in your .env file or environment.")
-        
     # Determine model to use
     selected_model = model or config["models"]["style_mapping"].get(style, config["models"]["default"])
     logger.info(f"Using model: {selected_model}")
@@ -714,19 +774,8 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
     print(f"Generating image with prompt: '{prompt}' using style: '{style}'")
     print("This may take a few moments...")
     
-    # Initialize provider based on configuration
-    if provider_name == "replicate":
-        # Initialize Replicate provider with retry logic
-        from mcp_image_server.providers.replicate import ReplicateProvider
-        provider = ReplicateProvider(api_token, config)
-    else:
-        logger.error(f"Unsupported provider: {provider_name}")
-        raise ValueError(f"Unsupported provider: {provider_name}. Currently only 'replicate' is supported.")
-    
-    # Generate image using provider (handles per-model retry logic internally),
+    # Each attempt runs on its model's provider (per-model retry logic lives there),
     # walking the fallback chain when a model fails outright.
-    logger.info(f"Using {provider.__class__.__name__} to generate image")
-
     requested_model = selected_model
     attempts = build_attempts(config, selected_model, quality, reference_images)
     generation_result = None
@@ -740,6 +789,7 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
         generation_params.update({k: v for k, v in model_input.items() if k != "prompt"})
 
         try:
+            provider = get_provider(candidate, config)
             generation_result = await provider.generate(**generation_params)
             selected_model = candidate
             break
@@ -769,6 +819,10 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
     web_optimize = CONFIG.get("optimization", {}).get("enabled", True)
     logger.info(f"Web optimization enabled: {web_optimize}")
     download_success, image_metadata = await download_and_process_image(image_url, local_path, optimize_for_web=web_optimize)
+    is_remote = image_url.startswith(("http://", "https://"))
+    if not is_remote:
+        Path(image_url).unlink(missing_ok=True)  # OpenAI-direct temp file
+        image_url = None
     
     if not download_success:
         logger.error(f"Failed to download image to local path: {local_path}")
@@ -810,8 +864,9 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
         json.dump(metadata, f, indent=2)
     logger.info(f"Saved metadata to: {metadata_path}")
     
-    # Save to cache if enabled
-    if CACHE and cache_key:
+    # A fallback result is not cached under the requested model's key, or every
+    # later call would keep returning it instead of retrying the requested model.
+    if CACHE and cache_key and not fallback_from:
         try:
             with open(actual_local_path, 'rb') as f:
                 image_data = f.read()
@@ -868,10 +923,10 @@ async def generate_blog_image(
 ) -> Dict[str, Any]:
     """
     Generate an image for blog posts using AI image generation with retry logic.
-    Defaults to OpenAI gpt-image-2 at "medium" quality (~$0.047/image) - the
-    recommended setting. Override `model` for FLUX/SDXL alternatives.
-    If gpt-image-2 fails (e.g. the OpenAI account is out of credit) the server
-    automatically retries on Replicate's billing and then on a quality-matched
+    Defaults to OpenAI gpt-image-2.5 Flare at "medium" quality (~$0.013/image) -
+    the recommended setting. Override `model` for Sunburst, FLUX or SDXL.
+    If it fails (e.g. the OpenAI account is out of credit) the server falls back
+    to gpt-image-2 on Replicate's billing and then to a quality-matched
     fallback model; `fallback_from` in the result names the original model.
 
     Args:
@@ -884,12 +939,14 @@ async def generate_blog_image(
                      - 4:3 (classic): Good balance for blog content
                      - 1:1 (square): Social media sharing
                      - 9:16 (portrait): Mobile-first content
-                     NOTE: gpt-image-2 supports 1:1, 3:2, 2:3 and a few fixed sizes;
+                     NOTE: gpt-image models support 1:1, 3:2, 2:3 and a few fixed sizes;
                      other ratios are mapped to the closest supported value.
         style: The style of image (photorealistic, photorealistic_with_text, artistic, cartoon, sketch)
                - photorealistic_with_text: Automatically uses Ideogram V3 Turbo for best text rendering
         model: Optional model override. Options:
-               - "openai/gpt-image-2" (default via config) - quality-priced: low $0.012 / medium $0.047 / high $0.128
+               - "openai/gpt-image-2.5-flare" (default) - fast, quality-priced: low $0.006 / medium $0.013 / high $0.053
+               - "openai/gpt-image-2.5-sunburst" - same price, slower, finer detail and tighter edits
+               - "openai/gpt-image-2" - previous gen via Replicate: low $0.012 / medium $0.047 / high $0.128
                BUDGET (various aspect ratio support):
                - "stability-ai/sdxl" - $0.0025/image (~400 per $1)
                - "black-forest-labs/flux-schnell" - $0.003/image (~333 per $1)
@@ -901,8 +958,8 @@ async def generate_blog_image(
                - "bytedance/seedream-3" - $0.050/image (~20 per $1) [ULTRA PREMIUM]
                - "google/nano-banana-2" - ~$0.06/image, 2K, reference images [FALLBACK for low/medium]
                - "google/nano-banana-pro" - ~$0.139/image, 2K, reference images [FALLBACK for high/auto]
-        quality: gpt-image-2 quality variant - "medium" ($0.047, default and
-                 recommended), "low" ($0.012), "high" ($0.128), or "auto".
+        quality: gpt-image quality variant - "medium" (default and recommended),
+                 "low", "high", or "auto". Prices per model above.
                  Ignored by non-gpt models.
         output_dir: Optional directory to save the image in. When set, the image
                     is saved directly here (no YYYY-MM/DD subfolders). Prefer an
@@ -911,7 +968,8 @@ async def generate_blog_image(
                   when no image extension is given. Auto-named when omitted.
         reference_image: Optional local path or http(s) URL (or a list of them)
                          used as a visual reference / image-to-image seed. Only
-                         openai/gpt-image-2 (the default) supports this; other
+                         gpt-image-2.5 (the default), gpt-image-2 and nano-banana
+                         support this; other
                          models return an error.
 
     Returns:
@@ -1060,7 +1118,7 @@ async def generate_blog_image(
 async def generate_premium_image(
     prompt: str,
     aspect_ratio: str,
-    model: str = "openai/gpt-image-2",
+    model: str = "openai/gpt-image-2.5-flare",
     style: str = "photorealistic",
     quality: str = "medium",
     output_dir: str = None,
@@ -1084,10 +1142,12 @@ async def generate_premium_image(
                      - 16:9: Standard blog headers, social media
                      - 4:3: Professional content, presentations
                      - 1:1: Social media posts, Instagram
-                     NOTE: gpt-image-2 supports 1:1, 3:2, 2:3 and a few fixed sizes;
+                     NOTE: gpt-image models support 1:1, 3:2, 2:3 and a few fixed sizes;
                      other ratios are mapped to the closest supported value.
         model: Premium model to use:
-               - "openai/gpt-image-2" (default) - quality-priced: low $0.012 / medium $0.047 / high $0.128
+               - "openai/gpt-image-2.5-flare" (default) - fast, quality-priced: low $0.006 / medium $0.013 / high $0.053
+               - "openai/gpt-image-2.5-sunburst" - same price, slower, finer detail and tighter edits
+               - "openai/gpt-image-2" - previous gen via Replicate: low $0.012 / medium $0.047 / high $0.128
                - "black-forest-labs/flux-dev" - $0.030/image, best FLUX quality/prompt adherence
                - "black-forest-labs/flux-1.1-pro" - $0.040/image, ultra premium quality
                - "recraft-ai/recraft-v3" - $0.040/image, specialized for design/logos
@@ -1097,8 +1157,8 @@ async def generate_premium_image(
                - "google/nano-banana-pro" - ~$0.139/image, 2K, reference images
         style: The style of image (photorealistic, photorealistic_with_text, artistic, cartoon, sketch)
                - photorealistic_with_text: Automatically uses Ideogram V3 Turbo for text rendering
-        quality: gpt-image-2 quality variant - "medium" ($0.047, default and
-                 recommended), "low" ($0.012), "high" ($0.128), or "auto".
+        quality: gpt-image quality variant - "medium" (default and recommended),
+                 "low", "high", or "auto". Prices per model above.
                  Ignored by non-gpt models.
         output_dir: Optional directory to save the image in. When set, the image
                     is saved directly here (no YYYY-MM/DD subfolders). Prefer an
@@ -1107,7 +1167,8 @@ async def generate_premium_image(
                   when no image extension is given. Auto-named when omitted.
         reference_image: Optional local path or http(s) URL (or a list of them)
                          used as a visual reference / image-to-image seed. Only
-                         openai/gpt-image-2 (the default) supports this; other
+                         gpt-image-2.5 (the default), gpt-image-2 and nano-banana
+                         support this; other
                          models return an error.
 
     Returns:
@@ -1117,6 +1178,8 @@ async def generate_premium_image(
 
     # Validate premium model (flux-schnell moved to budget)
     premium_models = [
+        "openai/gpt-image-2.5-flare",
+        "openai/gpt-image-2.5-sunburst",
         "openai/gpt-image-2",
         "black-forest-labs/flux-dev",
         "black-forest-labs/flux-1.1-pro",
@@ -1273,7 +1336,7 @@ async def generate_text_image(
     prompt: str,
     aspect_ratio: str = "16:9",
     style: str = "photorealistic",
-    model: str = "openai/gpt-image-2",
+    model: str = "openai/gpt-image-2.5-flare",
     quality: str = "medium",
     output_dir: str = None,
     filename: str = None,
@@ -1281,7 +1344,7 @@ async def generate_text_image(
 ) -> Dict[str, Any]:
     """
     Generate images with text using strong text-rendering models. Defaults to
-    OpenAI gpt-image-2 at "medium" quality (the recommended setting - text is
+    OpenAI gpt-image-2.5 Flare at "medium" quality (the recommended setting - text is
     already sharp; only pass quality="high" for dense or very small typography);
     Ideogram/Seedream/Recraft remain selectable via the model param.
     Optimized for images that include readable text, logos, signs, or typography.
@@ -1296,19 +1359,21 @@ async def generate_text_image(
                      - 1:1: Social media posts with text
                      - 3:2: Marketing materials, posters
                      - 21:9: Ultra-wide banners with text
-                     NOTE: gpt-image-2 supports 1:1, 3:2, 2:3 and a few fixed sizes;
+                     NOTE: gpt-image models support 1:1, 3:2, 2:3 and a few fixed sizes;
                      other ratios are mapped to the closest supported value.
         style: The style of image (photorealistic, photorealistic_with_text, artistic, cartoon, sketch)
                - photorealistic_with_text: Automatically uses Ideogram V3 Turbo for text rendering
         model: Text-specialized model to use:
-               - "openai/gpt-image-2" (default) - quality-priced: low $0.012 / medium $0.047 / high $0.128
+               - "openai/gpt-image-2.5-flare" (default) - fast, quality-priced: low $0.006 / medium $0.013 / high $0.053
+               - "openai/gpt-image-2.5-sunburst" - same price, slower, finer detail and tighter edits
+               - "openai/gpt-image-2" - previous gen via Replicate: low $0.012 / medium $0.047 / high $0.128
                - "ideogram-ai/ideogram-v3-turbo" - $0.035/image, best dedicated text renderer
                - "bytedance/seedream-3" - $0.050/image, cinematic quality with text support
                - "google/nano-banana-2" - ~$0.06/image, 2K, reference images
                - "google/nano-banana-pro" - ~$0.139/image, 2K, reference images
                - "recraft-ai/recraft-v3" - $0.040/image, design/logo specialist
-        quality: gpt-image-2 quality variant - "medium" ($0.047, default and
-                 recommended), "low" ($0.012), "high" ($0.128), or "auto".
+        quality: gpt-image quality variant - "medium" (default and recommended),
+                 "low", "high", or "auto". Prices per model above.
                  Ignored by non-gpt models.
         output_dir: Optional directory to save the image in. When set, the image
                     is saved directly here (no YYYY-MM/DD subfolders). Prefer an
@@ -1317,7 +1382,8 @@ async def generate_text_image(
                   when no image extension is given. Auto-named when omitted.
         reference_image: Optional local path or http(s) URL (or a list of them)
                          used as a visual reference / image-to-image seed. Only
-                         openai/gpt-image-2 (the default) supports this; other
+                         gpt-image-2.5 (the default), gpt-image-2 and nano-banana
+                         support this; other
                          models return an error.
 
     Returns:
@@ -1327,6 +1393,8 @@ async def generate_text_image(
 
     # Validate text-specialized model
     text_models = [
+        "openai/gpt-image-2.5-flare",
+        "openai/gpt-image-2.5-sunburst",
         "openai/gpt-image-2",
         "ideogram-ai/ideogram-v3-turbo",
         "bytedance/seedream-3",
@@ -1490,7 +1558,7 @@ GENERATION_JOBS: Dict[str, Dict[str, Any]] = {}
 async def start_image_generation(
     prompt: str,
     aspect_ratio: str,
-    model: str = "openai/gpt-image-2",
+    model: str = "openai/gpt-image-2.5-flare",
     style: str = "photorealistic",
     quality: str = "medium",
     output_dir: str = None,
@@ -1509,8 +1577,8 @@ async def start_image_generation(
 
     Accepts the same params as generate_premium_image (prompt, aspect_ratio, model,
     style, quality, output_dir, filename, reference_image); see that tool for
-    details. `quality` defaults to "medium" ($0.047, the recommended setting);
-    "low" ($0.012), "high" ($0.128) and "auto" are also accepted.
+    details. `quality` defaults to "medium" (the recommended setting);
+    "low", "high" and "auto" are also accepted.
     Returns a dict with status="processing" and a job_id.
     """
     job_id = uuid.uuid4().hex[:12]

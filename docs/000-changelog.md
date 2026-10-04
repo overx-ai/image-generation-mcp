@@ -1,7 +1,7 @@
 ---
 status: current
 created: 2026-07-22
-updated: 2026-09-03
+updated: 2026-10-04
 ---
 
 # 000 - Changelog
@@ -12,6 +12,16 @@ updated: 2026-09-03
 ## [Unreleased]
 
 ### Added
+- `openai/gpt-image-2.5-flare` (new default for every tool and style) and
+  `openai/gpt-image-2.5-sunburst`, called directly on the OpenAI Images API by
+  `OpenAIImagesProvider` (Replicate does not host 2.5). References go through
+  `/images/edits`. gpt-image-2 (Replicate-billed) is now the first fallback.
+
+### Changed
+- Fallback results are no longer cached under the requested model's key, so one
+  failed request does not pin a prompt to the substitute model for the cache TTL.
+
+### Added (earlier)
 - `output_dir` + `filename` params on all `generate_*` tools — save images to a
   chosen location (custom dir skips `YYYY-MM/DD` subfolders; honored on cache
   hits too).

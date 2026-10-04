@@ -1,7 +1,7 @@
 ---
 status: current
 created: 2026-07-22
-updated: 2026-09-03
+updated: 2026-10-04
 ---
 
 # 001 - Image Generation Tools
@@ -9,7 +9,8 @@ updated: 2026-09-03
 **Related**: [000 - Changelog](000-changelog.md), [002 - Model Fallback](002-model-fallback.md)
 
 Reference for the MCP tools exposed by `mcp_image_server/server.py`. Backend is
-Replicate; default model is `openai/gpt-image-2` (quality `medium`), with an
+Replicate and the OpenAI Images API; default model is `openai/gpt-image-2.5-flare`
+(OpenAI-direct, quality `medium`), with an
 automatic fallback chain when it fails — see [002](002-model-fallback.md).
 Generated images are saved locally (with a JSON metadata sidecar) and cached by
 content.
@@ -18,7 +19,7 @@ content.
 
 | Tool | Purpose |
 |------|---------|
-| `generate_blog_image` | Blocking generation, gpt-image-2 at `medium` quality |
+| `generate_blog_image` | Blocking generation, gpt-image-2.5 Flare at `medium` quality |
 | `generate_premium_image` | Blocking generation; FLUX/Ideogram/Recraft/Seedream/nano-banana selectable |
 | `generate_text_image` | Blocking generation tuned for readable text/logos |
 | `start_image_generation` | **Async**: start a job, return `job_id` immediately |
@@ -36,11 +37,11 @@ content.
 | `prompt` | — | required |
 | `aspect_ratio` | — | required (blog); `16:9` default (text). `landscape/portrait/square` or `1:1,16:9,21:9,3:2,2:3,4:5,5:4,3:4,4:3,9:16,9:21`. gpt-image-2 maps to its nearest supported ratio |
 | `style` | `photorealistic` | `photorealistic`, `photorealistic_with_text`, `artistic`, `cartoon`, `sketch` |
-| `model` | config default (`openai/gpt-image-2`) | see model list in tool docstrings |
-| `quality` | `medium` (all tools, **recommended — leave it alone**; `high` only for dense/small typography) | gpt-image-2 only: `low` $0.012 / `medium` $0.047 / `high` $0.128 / `auto`; ignored by other models. Also picks the fallback tier (see below) |
+| `model` | config default (`openai/gpt-image-2.5-flare`) | `openai/gpt-image-2.5-sunburst` for finer detail and tighter edits at the same price; full list in tool docstrings |
+| `quality` | `medium` (all tools, **recommended — leave it alone**; `high` only for dense/small typography) | gpt-image-2.5: `low` $0.006 / `medium` $0.013 / `high` $0.053 / `auto` (1024², larger sizes cost more); gpt-image-2: $0.012 / $0.047 / $0.128; ignored by other models. Also picks the fallback tier (see below) |
 | `output_dir` | config `storage.base_path` | **When set, saves straight here — no `YYYY-MM/DD` subfolders.** Prefer absolute paths; relative resolves against server cwd |
 | `filename` | auto `image_<uuid>.png` | `.png` appended if no image extension given |
-| `reference_image` | none | local path **or** http(s) URL, single or list. Supported by `openai/gpt-image-2` and both nano-bananas (others return a clear error) |
+| `reference_image` | none | local path **or** http(s) URL, single or list. Supported by both gpt-image-2.5 variants (sent to `/images/edits`), `openai/gpt-image-2` and both nano-bananas (others return a clear error) |
 
 **File**: `mcp_image_server/server.py` — helpers `resolve_output_base`,
 `generate_local_path`, `resolve_reference_images`, `save_cached_to_output`.

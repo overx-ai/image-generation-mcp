@@ -12,15 +12,17 @@ defaults:
 
 # Model Configuration
 models:
-  # Default model across tools - OpenAI gpt-image-2 (all tools default to
-  # quality "medium" ~$0.047/image). Override per call via `model`.
-  default: "openai/gpt-image-2"
+  # Default model across tools - OpenAI gpt-image-2.5 Flare, called directly with
+  # OPENAI_API_KEY (all tools default to quality "medium" ~$0.013/image).
+  # Override per call via `model`, e.g. "openai/gpt-image-2.5-sunburst".
+  default: "openai/gpt-image-2.5-flare"
 
-  # Tried in order when the primary model fails (e.g. the OpenAI account behind
-  # gpt-image-2 runs out of credit). All Replicate-native, no OpenAI dependency.
+  # Tried in order when the primary model fails (e.g. the OpenAI account runs out
+  # of credit). gpt-image-2 here runs Replicate-billed; the rest are Replicate-native.
   # "nano-banana" resolves by requested quality: low/medium -> google/nano-banana-2,
   # high/auto -> google/nano-banana-pro.
   fallback:
+    - "openai/gpt-image-2"
     - "nano-banana"
     - "bytedance/seedream-3"
 
@@ -31,6 +33,8 @@ models:
 
   # Premium models (native aspect ratio support)
   premium:
+    gpt_image_25_flare: "openai/gpt-image-2.5-flare"
+    gpt_image_25_sunburst: "openai/gpt-image-2.5-sunburst"
     gpt_image_2: "openai/gpt-image-2"
     nano_banana_2: "google/nano-banana-2"
     nano_banana_pro: "google/nano-banana-pro"
@@ -40,13 +44,13 @@ models:
     seedream: "bytedance/seedream-3"
     ideogram_turbo: "ideogram-ai/ideogram-v3-turbo"
 
-  # Style mapping - gpt-image-2 is the default for all styles
+  # Style mapping - gpt-image-2.5 Flare is the default for all styles
   style_mapping:
-    photorealistic: "openai/gpt-image-2"
-    photorealistic_with_text: "openai/gpt-image-2"
-    artistic: "openai/gpt-image-2"
-    cartoon: "openai/gpt-image-2"
-    sketch: "openai/gpt-image-2"
+    photorealistic: "openai/gpt-image-2.5-flare"
+    photorealistic_with_text: "openai/gpt-image-2.5-flare"
+    artistic: "openai/gpt-image-2.5-flare"
+    cartoon: "openai/gpt-image-2.5-flare"
+    sketch: "openai/gpt-image-2.5-flare"
 
 retry:
   max_attempts: 3

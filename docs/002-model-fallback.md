@@ -1,7 +1,7 @@
 ---
 status: current
 created: 2026-07-22
-updated: 2026-07-22
+updated: 2026-10-04
 ---
 
 # 002 - Model Fallback & Per-Model Inputs
@@ -22,10 +22,15 @@ Each rung gets the provider's own retry logic (`max_attempts`, backoff + jitter)
 
 | # | Attempt | Applies when |
 |---|---------|--------------|
-| 1 | requested model, own `OPENAI_API_KEY` | always |
+| 1 | requested model (default `openai/gpt-image-2.5-flare`, OpenAI-direct), own `OPENAI_API_KEY` | always, except an OpenAI-direct model with no key set |
 | 2 | **same model without our OpenAI key** → Replicate-billed | `OPENAI_API_KEY` set **and** model is `aspect_ratio_mode: gpt_image` |
-| 3 | `models.fallback[0]` — `nano-banana` | candidate ≠ requested model |
-| 4 | `models.fallback[1]` — `bytedance/seedream-3` | candidate ≠ requested model |
+| 3 | `models.fallback[0]` — `openai/gpt-image-2`, Replicate-billed | candidate ≠ requested model |
+| 4 | `models.fallback[1]` — `nano-banana` | candidate ≠ requested model |
+| 5 | `models.fallback[2]` — `bytedance/seedream-3` | candidate ≠ requested model |
+
+OpenAI-direct models (`requires_openai_key`, served by `OpenAIImagesProvider`)
+are dropped from the chain when `OPENAI_API_KEY` is unset, so the default still
+works on a Replicate-only setup.
 
 Rung 2 alone recovers from the dry/invalid-OpenAI-key case — the same model runs,
 billed by Replicate, with identical output quality.
@@ -48,9 +53,11 @@ the list, the first attempt is kept so the caller still gets the explanatory
 (`None` otherwise). Same fields in the JSON metadata sidecar.
 
 **Cache**: keys are computed by the tools from the *requested* model, before
-generation. A fallback image is stored under that key on purpose — a repeat of the
-same request serves it instead of re-failing. The stored metadata still names the
-model that ran.
+generation. A fallback image is **not** cached: stored under the requested
+model's key it would be served for the whole TTL, so one transient OpenAI
+failure would pin that prompt to the substitute model for 30 days. A repeat
+request retries the requested model instead (billing/auth errors fail fast,
+see `is_non_retryable`).
 
 **File**: `mcp_image_server/server.py` — `build_attempts`, `resolve_fallback_model`,
 `NANO_BANANA_BY_QUALITY`, and the attempt loop in `generate_image`.
