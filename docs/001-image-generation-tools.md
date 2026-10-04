@@ -35,7 +35,7 @@ content.
 | Param | Default | Notes |
 |-------|---------|-------|
 | `prompt` | — | required |
-| `aspect_ratio` | — | required (blog); `16:9` default (text). `landscape/portrait/square` or `1:1,16:9,21:9,3:2,2:3,4:5,5:4,3:4,4:3,9:16,9:21`. gpt-image-2 maps to its nearest supported ratio |
+| `aspect_ratio` | — | required (blog); `16:9` default (text). `landscape/portrait/square` or `1:1,16:9,21:9,3:2,2:3,4:5,5:4,3:4,4:3,9:16,9:21`. gpt-image models map to their nearest supported ratio/size |
 | `style` | `photorealistic` | `photorealistic`, `photorealistic_with_text`, `artistic`, `cartoon`, `sketch` |
 | `model` | config default (`openai/gpt-image-2.5-flare`) | `openai/gpt-image-2.5-sunburst` for finer detail and tighter edits at the same price; full list in tool docstrings |
 | `quality` | `medium` (all tools, **recommended — leave it alone**; `high` only for dense/small typography) | gpt-image-2.5: `low` $0.006 / `medium` $0.013 / `high` $0.053 / `auto` (1024², larger sizes cost more); gpt-image-2: $0.012 / $0.047 / $0.128; ignored by other models. Also picks the fallback tier (see below) |
@@ -48,9 +48,9 @@ content.
 
 ### Automatic fallback
 
-A failing model does not return an error to the client — the server retries
-gpt-image-2 without our OpenAI key (Replicate-billed), then switches to a
-quality-matched `nano-banana`, then `bytedance/seedream-3`. Results carry
+A failing model does not return an error to the client — the server falls back
+to gpt-image-2 on Replicate's billing, then to a quality-matched `nano-banana`,
+then `bytedance/seedream-3`. Results carry
 `fallback_from` when a substitute produced the image; `model`/`cost` report what
 actually ran.
 

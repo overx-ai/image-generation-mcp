@@ -33,11 +33,27 @@ load_dotenv(dotenv_path=env_file)
 
 # Import our core components
 from mcp_image_server.core.cache import ImageCache
-from mcp_image_server.providers.openai_images import OpenAIImagesProvider
+from mcp_image_server.providers.base import BaseProvider
+from mcp_image_server.providers.openai_images import (
+    DEFAULT_OUTPUT_FORMAT as OPENAI_DEFAULT_OUTPUT_FORMAT,
+    DEFAULT_QUALITY as OPENAI_DEFAULT_QUALITY,
+    DEFAULT_SIZE as OPENAI_DEFAULT_SIZE,
+    OpenAIImagesProvider,
+)
 from mcp_image_server.providers.replicate import ReplicateProvider
 from mcp_image_server.utils.image_optimizer import ImageOptimizer
 
 MODEL_CONFIGS = {**ReplicateProvider.MODEL_CONFIGS, **OpenAIImagesProvider.MODEL_CONFIGS}
+
+REMOTE_URL_SCHEMES = ("http://", "https://")
+
+
+def is_remote_url(ref: str) -> bool:
+    return ref.startswith(REMOTE_URL_SCHEMES)
+
+
+def is_openai_direct(model: str) -> bool:
+    return model in OpenAIImagesProvider.MODEL_CONFIGS
 
 # Initialize MCP server 
 mcp = FastMCP("Image Generation Server")
@@ -144,7 +160,7 @@ async def download_and_process_image(url: str, filepath: Path, optimize_for_web:
         # Ensure directory exists
         filepath.parent.mkdir(parents=True, exist_ok=True)
         
-        if url.startswith(("http://", "https://")):
+        if is_remote_url(url):
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             image_bytes = response.content
@@ -357,7 +373,7 @@ OPENAI_SIZE_MAP = {
 
 def resolve_openai_size(aspect_ratio: str) -> str:
     """Map a user/tool aspect ratio onto an OpenAI Images API size."""
-    return OPENAI_SIZE_MAP.get(aspect_ratio, "1024x1024")
+    return OPENAI_SIZE_MAP.get(aspect_ratio, OPENAI_DEFAULT_SIZE)
 
 
 # Quality variants for gpt-image-2 (drives price). Ignored by models without
@@ -437,7 +453,7 @@ def resolve_reference_images(reference_image: Union[str, List[str], None]) -> Tu
     items = []
     identity_parts = []
     for ref in refs:
-        if ref.startswith(("http://", "https://")):
+        if is_remote_url(ref):
             items.append(ref)
             identity_parts.append(ref)
         else:
@@ -563,6 +579,13 @@ def _demo_fallback() -> None:
         # Without an OpenAI key, gpt-image-2.5 is skipped rather than failing every call
         openai_api_key = None
         assert build_attempts(cfg25, flare, "medium")[0] == ("openai/gpt-image-2", False)
+        # ...unless nothing else is left: kept so get_provider names the missing key
+        assert build_attempts({}, flare, "medium") == [(flare, True)]
+        try:
+            get_provider(flare, CONFIG)
+            raise AssertionError("get_provider must reject OpenAI-direct models without a key")
+        except ValueError as missing_key:
+            assert "OPENAI_API_KEY" in str(missing_key)
     finally:
         openai_api_key = saved_key
 
@@ -577,6 +600,40 @@ def _demo_fallback() -> None:
     assert is_non_retryable(Exception("ModelError: Your token does not have sufficient credits. (E001)"))
     assert is_non_retryable(Exception("ModelError: Your API key is invalid. (E002)"))
     assert not is_non_retryable(Exception("connection reset by peer"))
+
+    # OpenAI-direct request path (requests.post mocked): references go to /images/edits,
+    # API errors stay recognisable as non-retryable and are length-capped.
+    from unittest import mock
+    from mcp_image_server.providers import openai_images
+    provider = OpenAIImagesProvider("sk-test", CONFIG)
+    ok = mock.Mock(ok=True, json=lambda: {"data": [{"b64_json": "aGk="}]})
+    with mock.patch.object(openai_images.requests, "post", return_value=ok) as post, \
+            mock.patch.object(openai_images, "_reference_file", return_value=("a.png", b"x", "image/png")):
+        assert provider._request({"model": "m"}, ["https://x/a.png"]) == b"hi"
+        assert post.call_args.args[0].endswith("/images/edits") and post.call_args.kwargs["files"][0][0] == "image[]"
+        provider._request({"model": "m"}, None)
+        assert post.call_args.args[0].endswith("/images/generations") and "json" in post.call_args.kwargs
+    quota = mock.Mock(ok=False, status_code=429,
+                      json=lambda: {"error": {"code": "insufficient_quota", "message": "x" * 5000}})
+    with mock.patch.object(openai_images.requests, "post", return_value=quota):
+        try:
+            provider._request({"model": "m"}, None)
+            raise AssertionError("an API error must raise")
+        except Exception as api_error:
+            assert is_non_retryable(api_error) and len(str(api_error)) < 1000, str(api_error)[:100]
+
+    # URL references: oversized downloads are refused; a nameless URL gets the default name
+    with mock.patch.object(openai_images, "REFERENCE_MAX_BYTES", 2), \
+            mock.patch.object(openai_images.requests, "get") as get:
+        download = get.return_value.__enter__.return_value.raw.read
+        download.return_value = b"abc"
+        try:
+            openai_images._reference_file("https://x/big.png")
+            raise AssertionError("an oversized reference must be refused")
+        except ValueError:
+            pass
+        download.return_value = b"ab"
+        assert openai_images._reference_file("https://x/?v=1") == ("reference.png", b"ab", "image/png")
 
 
 def _demo_async_jobs() -> None:
@@ -639,8 +696,8 @@ def build_model_input(model, prompt, aspect_ratio, replicate_aspect_ratio=None, 
         model_input = {
             "prompt": prompt,
             "size": resolve_openai_size(aspect_ratio),
-            "quality": quality or model_config.get("default_quality", "medium"),
-            "output_format": output_format or "png",
+            "quality": quality or model_config.get("default_quality", OPENAI_DEFAULT_QUALITY),
+            "output_format": output_format or OPENAI_DEFAULT_OUTPUT_FORMAT,
         }
         logger.info(f"Using OpenAI size mode for {model}: size={model_input['size']}, "
                     f"quality={model_input['quality']}")
@@ -714,10 +771,8 @@ def build_attempts(config, selected_model, quality, reference_images=None):
     recovers from "your token does not have sufficient credits". Rung 3+ switch models.
     OpenAI-direct models (gpt-image-2.5) are skipped when no OpenAI key is configured.
     """
-    configs = MODEL_CONFIGS
-
     attempts = [(selected_model, True)]
-    if openai_api_key and configs.get(selected_model, {}).get("aspect_ratio_mode") == "gpt_image":
+    if openai_api_key and MODEL_CONFIGS.get(selected_model, {}).get("aspect_ratio_mode") == "gpt_image":
         attempts.append((selected_model, False))
     for name in config.get("models", {}).get("fallback", []):
         candidate = resolve_fallback_model(name, quality)
@@ -725,22 +780,24 @@ def build_attempts(config, selected_model, quality, reference_images=None):
             attempts.append((candidate, False))
 
     if reference_images:
-        usable = [a for a in attempts if configs.get(a[0], {}).get("image_input_param")]
+        usable = [a for a in attempts if MODEL_CONFIGS.get(a[0], {}).get("image_input_param")]
         # Empty means the requested model itself can't take references - keep it so
         # build_model_input raises the explanatory ValueError instead of nothing.
         attempts = usable or attempts[:1]
 
     if not openai_api_key:
-        keyed = [a for a in attempts if configs.get(a[0], {}).get("requires_openai_key")]
-        if keyed:
-            logger.warning(f"Skipping {[m for m, _ in keyed]}: OPENAI_API_KEY not set")
-        attempts = [a for a in attempts if a not in keyed] or attempts
+        keyless = [a for a in attempts if not is_openai_direct(a[0])]
+        # An all-OpenAI-direct chain is kept so get_provider raises the missing-key error.
+        if keyless and keyless != attempts:
+            skipped = [m for m, _ in attempts if is_openai_direct(m)]
+            logger.warning(f"Skipping {skipped}: OPENAI_API_KEY not set")
+            attempts = keyless
     return attempts
 
 
-def get_provider(model: str, config: Dict[str, Any]):
+def get_provider(model: str, config: Dict[str, Any]) -> BaseProvider:
     """The provider that serves `model`, with its credential."""
-    if model in OpenAIImagesProvider.MODEL_CONFIGS:
+    if is_openai_direct(model):
         if not openai_api_key:
             raise ValueError(f"{model} needs OPENAI_API_KEY in .env")
         return OpenAIImagesProvider(openai_api_key, config)
@@ -808,21 +865,22 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
         logger.info(f"Generated with fallback model '{selected_model}' instead of '{fallback_from}'")
 
     image_url = generation_result["image_url"]
+    remote_url = image_url if is_remote_url(image_url) else None
     logger.info(f"Image generation completed, URL: {image_url}")
-    
-    # Resolve where to save (custom output_dir/filename or config-driven default)
-    base_path, organize_by_date = resolve_output_base(config, output_dir)
-    local_path = generate_local_path(str(base_path), organize_by_date, filename=filename)
-    logger.info(f"Generated local path for image: {local_path}")
-    
-    # Download and process image to local storage with web optimization
-    web_optimize = CONFIG.get("optimization", {}).get("enabled", True)
-    logger.info(f"Web optimization enabled: {web_optimize}")
-    download_success, image_metadata = await download_and_process_image(image_url, local_path, optimize_for_web=web_optimize)
-    is_remote = image_url.startswith(("http://", "https://"))
-    if not is_remote:
-        Path(image_url).unlink(missing_ok=True)  # OpenAI-direct temp file
-        image_url = None
+
+    try:
+        # Resolve where to save (custom output_dir/filename or config-driven default)
+        base_path, organize_by_date = resolve_output_base(config, output_dir)
+        local_path = generate_local_path(str(base_path), organize_by_date, filename=filename)
+        logger.info(f"Generated local path for image: {local_path}")
+
+        # Download and process image to local storage with web optimization
+        web_optimize = CONFIG.get("optimization", {}).get("enabled", True)
+        logger.info(f"Web optimization enabled: {web_optimize}")
+        download_success, image_metadata = await download_and_process_image(image_url, local_path, optimize_for_web=web_optimize)
+    finally:
+        if not remote_url:
+            Path(image_url).unlink(missing_ok=True)  # OpenAI-direct temp file
     
     if not download_success:
         logger.error(f"Failed to download image to local path: {local_path}")
@@ -839,10 +897,10 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
         "aspect_ratio": aspect_ratio,
         "model": selected_model,
         "generated_at": datetime.now().isoformat(),
-        "remote_url": image_url,
+        "remote_url": remote_url,
         "generation_time": generation_result.get("generation_time", 0),
         "attempts": generation_result.get("attempts", 1),
-        "requested_aspect_ratio": model_input.get("aspect_ratio", "1:1"),
+        "requested_aspect_ratio": model_input.get("aspect_ratio") or model_input.get("size", "1:1"),
         "requested_megapixels": model_input.get("megapixels", "1"),
         "requested_quality": model_input.get("quality"),
         "fallback_from": fallback_from,
@@ -898,7 +956,7 @@ async def generate_image(ctx, config, prompt, style, aspect_ratio, model, cache_
         "fallback_from": fallback_from,
         "cache_key": cache_key,
         "metadata_path": str(metadata_path.absolute()),
-        "remote_url": image_url,
+        "remote_url": remote_url,
         "generation_time": generation_result.get("generation_time", 0),
         "attempts": generation_result.get("attempts", 1),
         "dimensions": actual_dimensions,

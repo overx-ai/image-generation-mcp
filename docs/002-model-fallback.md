@@ -28,7 +28,7 @@ Each rung gets the provider's own retry logic (`max_attempts`, backoff + jitter)
 | 4 | `models.fallback[1]` — `nano-banana` | candidate ≠ requested model |
 | 5 | `models.fallback[2]` — `bytedance/seedream-3` | candidate ≠ requested model |
 
-OpenAI-direct models (`requires_openai_key`, served by `OpenAIImagesProvider`)
+OpenAI-direct models (served by `OpenAIImagesProvider`, see `is_openai_direct`)
 are dropped from the chain when `OPENAI_API_KEY` is unset, so the default still
 works on a Replicate-only setup.
 
