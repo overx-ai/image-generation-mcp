@@ -61,6 +61,7 @@ class ReplicateProvider(BaseProvider):
             "max_width": 1440,
             "max_height": 1440,
             "aspect_ratio_mode": "native",  # Uses aspect_ratio parameter
+            "supports_megapixels": True,
             "category": "budget"
         },
         
@@ -71,6 +72,7 @@ class ReplicateProvider(BaseProvider):
             "max_width": 1440,
             "max_height": 1440,
             "aspect_ratio_mode": "native",
+            "supports_megapixels": True,
             "category": "premium"
         },
         "black-forest-labs/flux-1.1-pro": {
@@ -79,6 +81,7 @@ class ReplicateProvider(BaseProvider):
             "max_width": 1440,
             "max_height": 1440,
             "aspect_ratio_mode": "native",
+            "supports_megapixels": True,
             "category": "premium"
         },
         "recraft-ai/recraft-v3": {
@@ -87,6 +90,8 @@ class ReplicateProvider(BaseProvider):
             "max_width": 1440,
             "max_height": 1440,
             "aspect_ratio_mode": "native",
+            "supported_ratios": ("1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16",
+                                 "4:5", "5:4"),
             "category": "premium"
         },
         "bytedance/seedream-3": {
@@ -95,6 +100,7 @@ class ReplicateProvider(BaseProvider):
             "max_width": 2048,
             "max_height": 2048,
             "aspect_ratio_mode": "native",
+            "supported_ratios": ("1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"),
             "category": "premium"
         },
         "ideogram-ai/ideogram-v3-turbo": {
@@ -103,9 +109,62 @@ class ReplicateProvider(BaseProvider):
             "max_width": 2048,
             "max_height": 2048,
             "aspect_ratio_mode": "native",
+            "supported_ratios": ("1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4",
+                                 "4:5", "5:4", "2:1", "1:2"),
             "category": "premium"
         },
-        
+
+        # Google Nano Banana - Gemini image models, native aspect ratios + reference images
+        "google/nano-banana-2": {
+            "friendly_name": "Nano Banana 2 (Gemini Flash Image)",
+            "cost_per_run": 0.06,
+            "max_width": 4096,
+            "max_height": 4096,
+            "aspect_ratio_mode": "native",
+            "supported_ratios": ("1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3",
+                                 "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"),
+            "extra_input": {"resolution": "2K"},  # model default is 1K
+            "supports_output_format": True,
+            "category": "premium",
+            "image_input_param": "image_input",
+            "image_input_is_list": True,
+        },
+        "google/nano-banana-pro": {
+            "friendly_name": "Nano Banana Pro (Gemini 3 Pro Image)",
+            "cost_per_run": 0.139,
+            "max_width": 4096,
+            "max_height": 4096,
+            "aspect_ratio_mode": "native",
+            "supported_ratios": ("1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
+                                 "9:16", "16:9", "21:9"),
+            "extra_input": {"resolution": "2K"},
+            "supports_output_format": True,
+            "category": "premium",
+            "image_input_param": "image_input",
+            "image_input_is_list": True,
+        },
+
+        # OpenAI GPT-Image-2 - price scales with the `quality` input (low/medium/high)
+        "openai/gpt-image-2": {
+            "friendly_name": "GPT-Image-2 (OpenAI)",
+            "cost_per_run": 0.012,  # fallback when quality is unknown (= low)
+            "cost_per_quality": {
+                "low": 0.012,     # ~83 images per $1
+                "medium": 0.047,  # ~21 images per $1
+                "high": 0.128,    # ~8 images per $1
+                "auto": 0.128,    # model picks; priced as high
+            },
+            "max_width": 4096,
+            "max_height": 4096,
+            "aspect_ratio_mode": "gpt_image",  # dedicated input path (no megapixels)
+            "category": "premium",
+            "supports_quality": ["low", "medium", "high", "auto"],
+            "default_quality": "medium",
+            # Reference/image-to-image support: Replicate field takes an array of image URIs
+            "image_input_param": "input_images",
+            "image_input_is_list": True,
+        },
+
         # Aliases for backward compatibility
         "flux-schnell": {
             "friendly_name": "FLUX.1 [schnell]",
@@ -114,6 +173,7 @@ class ReplicateProvider(BaseProvider):
             "max_height": 1440,
             "actual_model": "black-forest-labs/flux-schnell",
             "aspect_ratio_mode": "native",
+            "supports_megapixels": True,
             "category": "premium"
         },
         "flux-dev": {
@@ -123,6 +183,7 @@ class ReplicateProvider(BaseProvider):
             "max_height": 1440,
             "actual_model": "black-forest-labs/flux-dev",
             "aspect_ratio_mode": "native",
+            "supports_megapixels": True,
             "category": "premium"
         }
     }
@@ -220,27 +281,33 @@ class ReplicateProvider(BaseProvider):
         logger.debug(f"Using model ID directly: '{model}'")
         return model
     
-    def estimate_cost(self, model: str) -> float:
+    def estimate_cost(self, model: str, quality: str = None) -> float:
         """
         Estimate cost for generating an image with the given model.
-        
+
         Args:
             model: Model identifier
-            
+            quality: Optional quality variant (low/medium/high/auto). For models
+                     with per-quality pricing (e.g. gpt-image-2) this selects the
+                     matching price; otherwise it is ignored.
+
         Returns:
             Estimated cost in USD
         """
         resolved_model = self._resolve_model(model)
-        
-        if resolved_model in self.MODEL_CONFIGS:
-            cost = self.MODEL_CONFIGS[resolved_model]["cost_per_run"]
+        config = self.MODEL_CONFIGS.get(resolved_model) or self.MODEL_CONFIGS.get(model)
+
+        if config:
+            # Per-quality pricing takes precedence when a known quality is given
+            cost_per_quality = config.get("cost_per_quality")
+            if quality and cost_per_quality and quality in cost_per_quality:
+                cost = cost_per_quality[quality]
+                logger.debug(f"Cost estimate for {model} (quality={quality}): ${cost:.4f}")
+                return cost
+            cost = config["cost_per_run"]
             logger.debug(f"Cost estimate for {model}: ${cost:.4f}")
             return cost
-        elif model in self.MODEL_CONFIGS:
-            cost = self.MODEL_CONFIGS[model]["cost_per_run"]
-            logger.debug(f"Cost estimate for {model}: ${cost:.4f}")
-            return cost
-        
+
         # Default cost estimate for unknown models
         default_cost = 0.025
         logger.warning(f"Unknown model {model}, using default cost estimate: ${default_cost:.4f}")

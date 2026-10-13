@@ -46,12 +46,13 @@ class ImageCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Cache initialized - Directory: {cache_dir}, TTL: {ttl_days} days, Max size: {max_size_mb} MB")
     
-    def generate_cache_key(self, prompt: str, model: str, style: str = "photorealistic", 
-                          aspect_ratio: str = "landscape", replicate_aspect_ratio: str = None, 
-                          megapixels: str = "1", width: int = 1024, height: int = 768) -> str:
+    def generate_cache_key(self, prompt: str, model: str, style: str = "photorealistic",
+                          aspect_ratio: str = "landscape", replicate_aspect_ratio: str = None,
+                          megapixels: str = "1", width: int = 1024, height: int = 768,
+                          quality: str = None, reference_image_id: str = None) -> str:
         """
         Generate a SHA256 cache key from generation parameters.
-        
+
         Args:
             prompt: Text prompt for image generation
             model: Model identifier
@@ -61,20 +62,36 @@ class ImageCache:
             megapixels: Megapixel setting for Replicate
             width: Legacy width parameter (for backward compatibility)
             height: Legacy height parameter (for backward compatibility)
-            
+            quality: Optional quality variant (e.g. gpt-image-2 low/medium/high) that
+                     changes the output; appended to the key only when provided so
+                     existing keys for quality-less models stay stable
+            reference_image_id: Optional identity of a reference image (URL or file
+                     content hash); appended only when provided so plain-prompt keys
+                     stay stable
+
         Returns:
             SHA256 hash as hex string
         """
         # Normalize inputs for consistent hashing
         normalized_prompt = prompt.strip().lower()
-        
+
         # Use the replicate format if available, otherwise fall back to legacy
         if replicate_aspect_ratio:
             cache_input = f"{normalized_prompt}|{model}|{style}|{replicate_aspect_ratio}|{megapixels}"
         else:
             # Legacy format for backward compatibility
             cache_input = f"{normalized_prompt}|{model}|{style}|{aspect_ratio}|{width}x{height}"
-        
+
+        # Distinguish quality variants (e.g. gpt-image-2) without disturbing
+        # cache keys for models/calls that don't specify a quality.
+        if quality:
+            cache_input = f"{cache_input}|q={quality}"
+
+        # Referenced generations differ from plain-prompt ones; keep them apart.
+        # Appended only when present so existing keys stay stable.
+        if reference_image_id:
+            cache_input = f"{cache_input}|ref={reference_image_id}"
+
         cache_key = hashlib.sha256(cache_input.encode('utf-8')).hexdigest()
         logger.debug(f"Generated cache key: {cache_key} for input: {cache_input}")
         return cache_key
