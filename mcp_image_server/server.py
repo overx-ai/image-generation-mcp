@@ -469,7 +469,7 @@ def resolve_reference_images(reference_image: Union[str, List[str], None]) -> Tu
 
 
 def save_cached_to_output(src_path: str, config: Dict[str, Any], output_dir: str = None,
-                          filename: str = None) -> str:
+                          filename: Optional[str] = None) -> str:
     """Copy a cache-hit image to a requested output location; return the new path."""
     base, organize = resolve_output_base(config, output_dir)
     if organize:
@@ -516,6 +516,13 @@ def demo() -> None:
         assert organize is False and base.is_absolute()
         lp = generate_local_path(str(base), organize, filename="hero")
         assert lp.name == "hero.png" and lp.parent == base
+
+    # Clients send defaults explicitly, so every None-default param must accept null in the schema
+    import asyncio
+    for name, tool in asyncio.run(mcp.get_tools()).items():
+        for pname, prop in tool.parameters["properties"].items():
+            if "default" in prop and prop["default"] is None:
+                assert {"type": "null"} in prop.get("anyOf", []), f"{name}.{pname} rejects null"
 
     print("demo: OK")
     _demo_fallback()
@@ -973,11 +980,11 @@ async def generate_blog_image(
     prompt: str,
     aspect_ratio: str,
     style: str = "photorealistic",
-    model: str = None,
+    model: Optional[str] = None,
     quality: str = "medium",
-    output_dir: str = None,
-    filename: str = None,
-    reference_image: Union[str, List[str]] = None
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
+    reference_image: Optional[Union[str, List[str]]] = None
 ) -> Dict[str, Any]:
     """
     Generate an image for blog posts using AI image generation with retry logic.
@@ -1179,9 +1186,9 @@ async def generate_premium_image(
     model: str = "openai/gpt-image-2.5-flare",
     style: str = "photorealistic",
     quality: str = "medium",
-    output_dir: str = None,
-    filename: str = None,
-    reference_image: Union[str, List[str]] = None
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
+    reference_image: Optional[Union[str, List[str]]] = None
 ) -> Dict[str, Any]:
     """
     Generate premium quality images. Defaults to OpenAI gpt-image-2 at "medium"
@@ -1396,9 +1403,9 @@ async def generate_text_image(
     style: str = "photorealistic",
     model: str = "openai/gpt-image-2.5-flare",
     quality: str = "medium",
-    output_dir: str = None,
-    filename: str = None,
-    reference_image: Union[str, List[str]] = None
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
+    reference_image: Optional[Union[str, List[str]]] = None
 ) -> Dict[str, Any]:
     """
     Generate images with text using strong text-rendering models. Defaults to
@@ -1619,9 +1626,9 @@ async def start_image_generation(
     model: str = "openai/gpt-image-2.5-flare",
     style: str = "photorealistic",
     quality: str = "medium",
-    output_dir: str = None,
-    filename: str = None,
-    reference_image: Union[str, List[str]] = None
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
+    reference_image: Optional[Union[str, List[str]]] = None
 ) -> Dict[str, Any]:
     """
     Start an image generation job in the background and return immediately with a
@@ -1800,8 +1807,8 @@ async def optimize_existing_image(
     image_path: str,
     create_webp: bool = True,
     create_responsive: bool = False,
-    max_width: int = None,
-    max_height: int = None
+    max_width: Optional[int] = None,
+    max_height: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Optimize an existing image for web deployment.
@@ -1894,7 +1901,7 @@ async def optimize_existing_image(
 
 @mcp.tool()
 async def batch_optimize_images(
-    directory: str = None,
+    directory: Optional[str] = None,
     create_webp: bool = True,
     create_responsive: bool = False
 ) -> Dict[str, Any]:
